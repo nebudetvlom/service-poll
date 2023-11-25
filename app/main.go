@@ -175,7 +175,74 @@ func CheckAlive(c *gin.Context) {
 
 // GetPoll возвращает опрос с вопросами по указанному идентификатору.
 func GetPoll(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса из параметра запроса
+	pollID := c.Param("id")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.Preload("Questions.PossibleAnswer").Preload("Answers.PossibleAnswers").First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Формируем ответ с данными об опросе
+	var pollResponse struct {
+		ID        uint   `json:"id"`
+		Title     string `json:"title"`
+		URL       string `json:"url"`
+		Questions []struct {
+			ID              uint   `json:"id"`
+			Text            string `json:"text"`
+			Type            string `json:"type"`
+			PossibleAnswers []struct {
+				ID   uint   `json:"id"`
+				Text string `json:"text"`
+			} `json:"possible_answers"`
+		} `json:"questions"`
+	}
+
+	pollResponse.ID = existingPoll.ID
+	pollResponse.Title = existingPoll.Title
+	pollResponse.URL = existingPoll.URL
+
+	for _, question := range existingPoll.Questions {
+		var questionResponse struct {
+			ID              uint   `json:"id"`
+			Text            string `json:"text"`
+			Type            string `json:"type"`
+			PossibleAnswers []struct {
+				ID   uint   `json:"id"`
+				Text string `json:"text"`
+			} `json:"possible_answers"`
+		}
+
+		questionResponse.ID = question.ID
+		questionResponse.Text = question.Text
+		questionResponse.Type = question.Type
+
+		for _, possibleAnswer := range question.PossibleAnswer {
+			questionResponse.PossibleAnswers = append(questionResponse.PossibleAnswers, struct {
+				ID   uint   `json:"id"`
+				Text string `json:"text"`
+			}{
+				ID:   possibleAnswer.ID,
+				Text: possibleAnswer.Text,
+			})
+		}
+
+		pollResponse.Questions = append(pollResponse.Questions, questionResponse)
+	}
+
+	c.JSON(http.StatusOK, pollResponse)
+}
+
+// getAnswerPossibleAnswerIDs возвращает идентификаторы возможных ответов для ответа на вопрос
+func getAnswerPossibleAnswerIDs(possibleAnswers []PossibleAnswer) []uint {
+	var ids []uint
+	for _, possibleAnswer := range possibleAnswers {
+		ids = append(ids, possibleAnswer.ID)
+	}
+	return ids
 }
 
 // CreatePoll создает новый опрос.

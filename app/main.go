@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -303,13 +303,33 @@ func RegisterAnswer(c *gin.Context) {
 		return
 	}
 
-	type AnswerRequest struct {
-		AccessToken string `json:"access_token" binding:"required"`
-		UserID      uint   `json:"user_id" binding:"required"`
+	// AnswerResponse структура для формирования ответа на регистрацию ответов
+	type AnswerResponse struct {
+		AccessToken string `json:"access_token"`
+		PollID      uint   `json:"poll_id"`
+		UserID      uint   `json:"user_id"`
 		Results     []struct {
-			QuestionID uint   `json:"question_id" binding:"required"`
-			Answers    []uint `json:"answers" binding:"required,min=1"`
-		} `json:"results" binding:"required"`
+			QuestionID uint   `json:"question_id"`
+			Answers    []uint `json:"answers"`
+		} `json:"results"`
+	}
+
+	// AnswerRequest структура для разбора запроса
+	type AnswerRequest struct {
+		Attributes struct {
+			AccessToken string `json:"access_token" binding:"required"`
+			UserID      uint   `json:"user_id" binding:"required"`
+			Username    string `json:"username"`
+			Email       string `json:"email"`
+			UserData    struct {
+				Reason string `json:"reason"`
+				State  string `json:"state"`
+			} `json:"user_data"`
+			Results []struct {
+				Question string `json:"question" binding:"required"`
+				Answer   string `json:"answer" binding:"required"`
+			} `json:"results" binding:"required"`
+		} `json:"attributes"`
 	}
 
 	var answerRequest AnswerRequest
@@ -319,44 +339,50 @@ func RegisterAnswer(c *gin.Context) {
 		return
 	}
 
-	// Ваши проверки и логика обработки ответа
+	var answerResponse AnswerResponse
+	answerResponse.AccessToken = answerRequest.Attributes.AccessToken
+	answerResponse.PollID = existingPoll.ID
+	answerResponse.UserID = answerRequest.Attributes.UserID
 
-	for _, result := range answerRequest.Results {
-		// Проверяем, существует ли вопрос с указанным ID в опросе
+	for _, result := range answerRequest.Attributes.Results {
+		// Проверяем, существует ли вопрос с указанным текстом в опросе
 		var existingQuestion Question
-		if err := DB.First(&existingQuestion, result.QuestionID).Error; err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Question not found"})
+		if err := DB.Where("text = ? AND poll_id = ?", result.Question, existingPoll.ID).First(&existingQuestion).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Question not found (%s)", result.Question)})
 			return
 		}
 
 		// Проверяем тип вопроса
-		if existingQuestion.Type == "single" && len(result.Answers) != 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "For single type question, exactly one answer is required"})
+		if existingQuestion.Type == "single" && strings.Count(result.Answer, ",") > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "For single type question, only one answer is allowed"})
 			return
-		} else if existingQuestion.Type == "multiple" && len(result.Answers) < 2 {
+		} else if existingQuestion.Type == "multiple" && strings.Count(result.Answer, ",") == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "For multiple type question, at least two answers are required"})
 			return
 		}
 
+		// Разделяем варианты ответов, если их несколько
+		answers := strings.Split(result.Answer, ",")
+
 		// Собираем все возможные ответы для данного вопроса
 		var possibleAnswers []PossibleAnswer
-		for _, answerID := range result.Answers {
+		for _, answerText := range answers {
+			answerText = strings.TrimSpace(answerText)
+			// Проверяем, существует ли вариант ответа для данного вопроса
 			var existingPossibleAnswer PossibleAnswer
-			if err := DB.Where("question_id = ?", result.QuestionID).First(&existingPossibleAnswer, answerID).Error; err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Possible Answer (%d) not found for the specified question (%d)", result.QuestionID, answerID)})
+			if err := DB.Where("text = ? AND question_id = ?", answerText, existingQuestion.ID).First(&existingPossibleAnswer).Error; err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Possible Answer (%s) not found for the specified question (%s)", answerText, result.Question)})
 				return
 			}
 			possibleAnswers = append(possibleAnswers, existingPossibleAnswer)
 		}
 
-		pollIDInt, _ := strconv.Atoi(pollID)
-
 		// Создаем новый объект Answer и связываем с вариантами ответов
 		newAnswer := Answer{
-			UserID:          answerRequest.UserID,
-			AccessToken:     answerRequest.AccessToken,
-			QuestionID:      result.QuestionID,
-			PollID:          uint(pollIDInt),
+			UserID:          answerRequest.Attributes.UserID,
+			AccessToken:     answerRequest.Attributes.AccessToken,
+			QuestionID:      existingQuestion.ID,
+			PollID:          existingPoll.ID,
 			PossibleAnswers: possibleAnswers,
 		}
 
@@ -364,7 +390,22 @@ func RegisterAnswer(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register answer"})
 			return
 		}
+
+		// Формируем результаты ответа для структуры ответа
+		var resultAnswers []uint
+		for _, possibleAnswer := range possibleAnswers {
+			resultAnswers = append(resultAnswers, possibleAnswer.ID)
+		}
+
+		// Добавляем результаты в структуру ответа
+		answerResponse.Results = append(answerResponse.Results, struct {
+			QuestionID uint   `json:"question_id"`
+			Answers    []uint `json:"answers"`
+		}{
+			QuestionID: existingQuestion.ID,
+			Answers:    resultAnswers,
+		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Answers registered successfully!"})
+	c.JSON(http.StatusOK, answerResponse)
 }

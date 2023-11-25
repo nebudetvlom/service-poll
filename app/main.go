@@ -317,7 +317,51 @@ func UpdatePoll(c *gin.Context) {
 
 // DeletePoll удаляет опрос по указанному идентификатору.
 func DeletePoll(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса из параметра запроса
+	pollID := c.Param("id")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.Preload("Questions.PossibleAnswer.Answers").Preload("Answers").First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Сохраняем название опроса перед удалением
+	pollTitle := existingPoll.Title
+
+	// Удаляем связанные ответы
+	for _, answer := range existingPoll.Answers {
+		if err := DB.Delete(&answer).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete answers"})
+			return
+		}
+	}
+
+	// Удаляем связанные вопросы и их варианты ответов
+	for _, question := range existingPoll.Questions {
+		// Удаляем варианты ответов
+		for _, possibleAnswer := range question.PossibleAnswer {
+			if err := DB.Delete(&possibleAnswer).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete possible answers"})
+				return
+			}
+		}
+
+		// Удаляем вопрос
+		if err := DB.Delete(&question).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete questions"})
+			return
+		}
+	}
+
+	// Удаляем опрос
+	if err := DB.Delete(&existingPoll).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete poll"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Poll '%s' deleted successfully", pollTitle)})
 }
 
 // GetPollResults возвращает результаты опроса по указанному идентификатору.

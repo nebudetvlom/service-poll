@@ -103,6 +103,15 @@ func initDB() {
 	}
 }
 
+// getAnswerPossibleAnswerIDs возвращает идентификаторы возможных ответов для ответа на вопрос
+func getAnswerPossibleAnswerIDs(possibleAnswers []PossibleAnswer) []uint {
+	var ids []uint
+	for _, possibleAnswer := range possibleAnswers {
+		ids = append(ids, possibleAnswer.ID)
+	}
+	return ids
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -236,15 +245,6 @@ func GetPoll(c *gin.Context) {
 	c.JSON(http.StatusOK, pollResponse)
 }
 
-// getAnswerPossibleAnswerIDs возвращает идентификаторы возможных ответов для ответа на вопрос
-func getAnswerPossibleAnswerIDs(possibleAnswers []PossibleAnswer) []uint {
-	var ids []uint
-	for _, possibleAnswer := range possibleAnswers {
-		ids = append(ids, possibleAnswer.ID)
-	}
-	return ids
-}
-
 // CreatePoll создает новый опрос.
 func CreatePoll(c *gin.Context) {
 	var pollData struct {
@@ -275,7 +275,44 @@ func CreatePoll(c *gin.Context) {
 
 // UpdatePoll изменяет опрос по указанному идентификатору.
 func UpdatePoll(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса из параметра запроса
+	pollID := c.Param("id")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Извлекаем данные обновления опроса из тела запроса
+	var updateData struct {
+		Title string `json:"title"`
+		URL   string `json:"url"`
+	}
+
+	// Проверяем и извлекаем данные из тела запроса
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Обновляем данные опроса, если они предоставлены
+	if updateData.Title != "" {
+		existingPoll.Title = updateData.Title
+	}
+
+	if updateData.URL != "" {
+		existingPoll.URL = updateData.URL
+	}
+
+	// Сохраняем обновленный опрос в базе данных
+	if err := DB.Save(&existingPoll).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update poll"})
+		return
+	}
+
+	c.JSON(http.StatusOK, existingPoll)
 }
 
 // DeletePoll удаляет опрос по указанному идентификатору.

@@ -13,6 +13,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// AnswerPossibleAnswer представляет связь между ответами и возможными ответами
+type AnswerPossibleAnswer struct {
+	gorm.Model
+	AnswerID         uint
+	PossibleAnswerID uint
+}
+
 // Answer таблица
 type Answer struct {
 	gorm.Model
@@ -66,6 +73,9 @@ func Migrate(c *gin.Context) {
 	}
 	if DB.Migrator().HasTable(&Answer{}) == false {
 		DB.AutoMigrate(&Answer{})
+	}
+	if DB.Migrator().HasTable(&AnswerPossibleAnswer{}) == false {
+		DB.AutoMigrate(&AnswerPossibleAnswer{})
 	}
 
 	c.JSON(200, gin.H{
@@ -163,11 +173,11 @@ func main() {
 
 	// PATCH /poll/:id/question
 	// Изменяет вопрос к опросу по указанному идентификатору.
-	router.PATCH("/poll/:id/question", UpdateQuestion)
+	router.PATCH("/poll/:id/question/:qid", UpdateQuestion)
 
 	// DELETE /poll/:id/question
 	// Удаляет вопрос к опросу по указанному идентификатору.
-	router.DELETE("/poll/:id/question", DeleteQuestion)
+	router.DELETE("/poll/:id/question/:qid", DeleteQuestion)
 
 	// POST /poll/:id/answer
 	// Регистрирует ответ на вопрос к опросу по указанному идентификатору.
@@ -366,7 +376,87 @@ func DeletePoll(c *gin.Context) {
 
 // GetPollResults возвращает результаты опроса по указанному идентификатору.
 func GetPollResults(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса из параметра запроса
+	pollID := c.Param("id")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.Preload("Questions.PossibleAnswer.Answers.PossibleAnswers").Preload("Answers.PossibleAnswers").First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Структура для хранения результатов
+	var pollResults struct {
+		ID      uint `json:"id"`
+		Results []struct {
+			Question         string `json:"question"`
+			Answer           string `json:"answer"`
+			AnswerCnt        int    `json:"answer_cnt"`
+			AnswerPercentage string `json:"answer_percentage"`
+		} `json:"results"`
+	}
+
+	pollResults.ID = existingPoll.ID
+
+	// Пройдемся по всем вопросам
+	for _, question := range existingPoll.Questions {
+		// Карта для подсчета количества ответов на каждый вариант ответа
+		answerCounts := make(map[string]int)
+
+		var answers []Answer
+		if err := DB.Where("question_id = ?", question.ID).Find(&answers).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch answers"})
+			return
+		}
+
+		for _, answer := range answers {
+			var answerPossibleAnswers []AnswerPossibleAnswer
+
+			// Загружаем связанные записи из таблицы answer_possible_answers для данного ответа
+			if err := DB.Where("answer_id = ?", answer.ID).Find(&answerPossibleAnswers).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch possible answers"})
+				return
+			}
+
+			for _, apa := range answerPossibleAnswers {
+				// Получаем связанный возможный ответ
+				var possibleAnswer PossibleAnswer
+				if err := DB.First(&possibleAnswer, apa.PossibleAnswerID).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch possible answer"})
+					return
+				}
+
+				// Увеличиваем счетчик ответов для данного варианта ответа
+				answerCounts[possibleAnswer.Text]++
+			}
+		}
+
+		// Подсчитываем общее количество ответов на вопрос
+		totalAnswers := len(answers)
+
+		// Пройдемся по всем вариантам ответа и рассчитаем процентное соотношение
+		for answerText, answerCount := range answerCounts {
+			percentage := (float64(answerCount) / float64(totalAnswers)) * 100
+
+			// Добавляем результат в структуру
+			result := struct {
+				Question         string `json:"question"`
+				Answer           string `json:"answer"`
+				AnswerCnt        int    `json:"answer_cnt"`
+				AnswerPercentage string `json:"answer_percentage"`
+			}{
+				Question:         question.Text,
+				Answer:           answerText,
+				AnswerCnt:        answerCount,
+				AnswerPercentage: fmt.Sprintf("%.3f", percentage),
+			}
+
+			pollResults.Results = append(pollResults.Results, result)
+		}
+	}
+
+	c.JSON(http.StatusOK, pollResults)
 }
 
 func AddQuestion(c *gin.Context) {
@@ -432,12 +522,161 @@ func AddQuestion(c *gin.Context) {
 
 // UpdateQuestion изменяет вопрос к опросу по указанному идентификатору.
 func UpdateQuestion(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса и вопроса из параметра запроса
+	pollID := c.Param("id")
+	questionID := c.Param("qid")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Проверяем, существует ли вопрос с указанным идентификатором в рамках данного опроса
+	var existingQuestion Question
+	if err := DB.Where("id = ? AND poll_id = ?", questionID, pollID).First(&existingQuestion).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Question not found"})
+		return
+	}
+
+	// Теперь можешь получить связанные данные (например, PossibleAnswers) при необходимости:
+	var possibleAnswers []PossibleAnswer
+	if err := DB.Where("question_id = ?", existingQuestion.ID).Find(&possibleAnswers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch possible answers"})
+		return
+	}
+
+	// Привязываем данные из запроса к структуре Question
+	var updatedQuestionData struct {
+		Text    string   `json:"text" binding:"required"`
+		Type    string   `json:"type" binding:"required,oneof=single multiple"`
+		Answers []string `json:"answers" binding:"required,min=1"`
+	}
+
+	if err := c.ShouldBindJSON(&updatedQuestionData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Проверка значения Type
+	if updatedQuestionData.Type != "single" && updatedQuestionData.Type != "multiple" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Type must be either 'single' or 'multiple'"})
+		return
+	}
+
+	// Обновляем данные вопроса
+	existingQuestion.Text = updatedQuestionData.Text
+	existingQuestion.Type = updatedQuestionData.Type
+
+	// Сохраняем изменения в базе данных
+	if err := DB.Save(&existingQuestion).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update question"})
+		return
+	}
+
+	// Обновляем варианты ответов
+	for _, possibleAnswer := range possibleAnswers {
+		// Проверяем, есть ли вариант ответа в списке обновленных
+		found := false
+		for _, updatedAnswer := range updatedQuestionData.Answers {
+			if possibleAnswer.Text == updatedAnswer {
+				found = true
+				break
+			}
+		}
+
+		// Если вариант ответа не найден, удаляем его
+		if !found {
+			if err := DB.Delete(&possibleAnswer).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete possible answer"})
+				return
+			}
+			if err := DB.Where("possible_answer_id = ?", possibleAnswer.ID).Delete(&AnswerPossibleAnswer{}).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete exact answer"})
+				return
+			}
+		}
+	}
+
+	// Добавляем новые варианты ответов
+	for _, updatedAnswer := range updatedQuestionData.Answers {
+		found := false
+		for _, possibleAnswer := range possibleAnswers {
+			if updatedAnswer == possibleAnswer.Text {
+				found = true
+				break
+			}
+		}
+
+		// Если вариант ответа не найден, добавляем его
+		if !found {
+			newPossibleAnswer := PossibleAnswer{
+				Text:       updatedAnswer,
+				QuestionID: existingQuestion.ID,
+			}
+
+			if err := DB.Create(&newPossibleAnswer).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create possible answer"})
+				return
+			}
+		}
+	}
+
+	// Возвращаем успешный ответ
+	c.JSON(http.StatusOK, existingQuestion)
 }
 
 // DeleteQuestion удаляет вопрос к опросу по указанному идентификатору.
 func DeleteQuestion(c *gin.Context) {
-	// ... логика обработки запроса ...
+	// Получаем идентификатор опроса и вопроса из параметра запроса
+	pollID := c.Param("id")
+	questionID := c.Param("qid")
+
+	// Проверяем, существует ли опрос с указанным идентификатором
+	var existingPoll Poll
+	if err := DB.First(&existingPoll, pollID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Проверяем, существует ли вопрос с указанным идентификатором в рамках данного опроса
+	var existingQuestion Question
+	if err := DB.Where("id = ? AND poll_id = ?", questionID, pollID).First(&existingQuestion).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Question not found"})
+		return
+	}
+
+	// Сохраняем название удаляемого вопроса
+	deletedQuestionText := existingQuestion.Text
+
+	// Собираем все идентификаторы возможных вариантов ответа для данного вопроса
+	var possibleAnswerIDs []uint
+	if err := DB.Model(&PossibleAnswer{}).Where("question_id = ?", existingQuestion.ID).Pluck("id", &possibleAnswerIDs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch possible answer IDs"})
+		return
+	}
+
+	// Удаляем связанные записи из таблицы answer_possible_answers
+	if err := DB.Where("possible_answer_id IN ?", possibleAnswerIDs).Delete(&AnswerPossibleAnswer{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete answer_possible_answers"})
+		return
+	}
+
+	// Удаляем варианты ответов
+	if err := DB.Where("question_id = ?", existingQuestion.ID).Delete(&PossibleAnswer{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete possible answers"})
+		return
+	}
+
+	// Удаляем вопрос
+	if err := DB.Delete(&existingQuestion).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete question"})
+		return
+	}
+
+	// Возвращаем успешный ответ с названием удаляемого вопроса
+	c.JSON(http.StatusOK, gin.H{"message": "Question '" + deletedQuestionText + "' deleted successfully"})
 }
 
 func RegisterAnswer(c *gin.Context) {

@@ -6,20 +6,10 @@ import (
 	"service-poll/migrations"
 	"service-poll/pkg/db"
 	"service-poll/pkg/handlers"
-	"service-poll/pkg/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
-
-// getAnswerPossibleAnswerIDs возвращает идентификаторы возможных ответов для ответа на вопрос
-func getAnswerPossibleAnswerIDs(possibleAnswers []models.PossibleAnswer) []uint {
-	var ids []uint
-	for _, possibleAnswer := range possibleAnswers {
-		ids = append(ids, possibleAnswer.ID)
-	}
-	return ids
-}
 
 func main() {
 	err := godotenv.Load()
@@ -64,11 +54,11 @@ func main() {
 	// Добавляет вопрос к опросу по указанному идентификатору.
 	router.POST("/poll/:id/question", handlers.AddQuestion)
 
-	// PATCH /poll/:id/question
+	// PATCH /poll/:id/question/:qid
 	// Изменяет вопрос к опросу по указанному идентификатору.
 	router.PATCH("/poll/:id/question/:qid", handlers.UpdateQuestion)
 
-	// DELETE /poll/:id/question
+	// DELETE /poll/:id/question/:qid
 	// Удаляет вопрос к опросу по указанному идентификатору.
 	router.DELETE("/poll/:id/question/:qid", handlers.DeleteQuestion)
 

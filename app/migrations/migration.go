@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Создаем таблицы
+// Создаем таблицы и заполняем их фикстурами
 func Migrate(c *gin.Context) {
 	if db.DB.Migrator().HasTable(&models.Poll{}) == false {
 		db.DB.AutoMigrate(&models.Poll{})
@@ -82,7 +82,6 @@ func CreatePolls() error {
 			tx.Rollback()
 			return err
 		}
-		// Если все в порядке, коммитим транзакцию
 		return nil
 	})
 }
@@ -216,7 +215,7 @@ func createAnswers() error {
 		if question.Type == "single" {
 			randomAnswersCount = 1
 		} else if question.Type == "multiple" {
-			randomAnswersCount = rand.Intn(2) + 2 // от 2 до 3 ответов
+			randomAnswersCount = rand.Intn(2) + 2
 		}
 
 		// Выбираем случайные ответы и создаем связи

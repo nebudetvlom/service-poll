@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// AddQuestion Добавляет вопрос к опросу по указанному идентификатору.
 func AddQuestion(c *gin.Context) {
 	// Получаем идентификатор опроса из параметра запроса
 	pollID := c.Param("id")

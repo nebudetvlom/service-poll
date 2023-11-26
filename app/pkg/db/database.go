@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var DB *gorm.DB // глобальная переменная для доступа к базе данных
+var DB *gorm.DB
 var err error
 
 func InitDB() {

@@ -2,9 +2,8 @@ name: "go-pg"
 
 services:
     golang:
-        build: ./
+        build: ../
         container_name: go-m
-        command: tail -F anything
         depends_on:
             - pgsql
         ports:

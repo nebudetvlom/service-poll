@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterAnswer Регистрирует ответ на вопрос к опросу по указанному идентификатору.
 func RegisterAnswer(c *gin.Context) {
 	// Получаем идентификатор опроса из параметра запроса
 	pollID := c.Param("id")

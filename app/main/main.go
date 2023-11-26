@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"service-poll/migrations"
 	"service-poll/pkg/db"
 	"service-poll/pkg/handlers"
 	"service-poll/pkg/models"
@@ -10,29 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
-
-// Создаем таблицы
-func Migrate(c *gin.Context) {
-	if db.DB.Migrator().HasTable(&models.Poll{}) == false {
-		db.DB.AutoMigrate(&models.Poll{})
-	}
-	if db.DB.Migrator().HasTable(&models.Question{}) == false {
-		db.DB.AutoMigrate(&models.Question{})
-	}
-	if db.DB.Migrator().HasTable(&models.PossibleAnswer{}) == false {
-		db.DB.AutoMigrate(&models.PossibleAnswer{})
-	}
-	if db.DB.Migrator().HasTable(&models.Answer{}) == false {
-		db.DB.AutoMigrate(&models.Answer{})
-	}
-	if db.DB.Migrator().HasTable(&models.AnswerPossibleAnswer{}) == false {
-		db.DB.AutoMigrate(&models.AnswerPossibleAnswer{})
-	}
-
-	c.JSON(200, gin.H{
-		"message": "Migrations applied successfully!",
-	})
-}
 
 // getAnswerPossibleAnswerIDs возвращает идентификаторы возможных ответов для ответа на вопрос
 func getAnswerPossibleAnswerIDs(possibleAnswers []models.PossibleAnswer) []uint {
@@ -56,7 +34,7 @@ func main() {
 
 	// GET /check_alive
 	// Проверяет, работает ли сервер.
-	router.GET("/migrate", Migrate)
+	router.GET("/migrate", migrations.Migrate)
 
 	// GET /check_alive
 	// Проверяет, работает ли сервер.

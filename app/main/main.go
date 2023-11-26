@@ -32,9 +32,9 @@ func main() {
 
 	router := gin.Default()
 
-	// GET /check_alive
-	// Проверяет, работает ли сервер.
-	router.GET("/migrate", migrations.Migrate)
+	// POST /migrate
+	// Создаёт базу данных и таблицы + наполняет их фикстурами
+	router.POST("/migrate", migrations.Migrate)
 
 	// GET /check_alive
 	// Проверяет, работает ли сервер.
